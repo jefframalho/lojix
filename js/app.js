@@ -35,7 +35,7 @@ function render() {
   $("#view").innerHTML = V.telaAtual();
   $("#emp").textContent = S.empresa.nome;
   const r = RAMOS[S.ramo];
-  document.documentElement.style.setProperty("--brand", r.cor || "#4338CA");
+  document.documentElement.style.setProperty("--brand", r.cor || "#1F7A5A");
   $("#ramo").textContent = r.ico + " " + r.nome;
   document.title = S.empresa.nome + " · " + PRODUTO.nome;
 }
@@ -474,6 +474,7 @@ document.addEventListener("click", (e) => {
   const fn = ACOES[el.dataset.a]; if (fn) fn(el, e);
 });
 document.addEventListener("change", (e) => {
+  if (e.target && e.target.name === "ramo" && RAMOS[e.target.value]) document.documentElement.style.setProperty("--brand", RAMOS[e.target.value].cor); // mostra a cor do ramo já na escolha
   const el = e.target.closest("[data-ch]"); if (el && MUDANCAS[el.dataset.ch]) MUDANCAS[el.dataset.ch](el);
 });
 document.addEventListener("input", (e) => {

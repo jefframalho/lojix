@@ -10,7 +10,7 @@ const ROT_PADRAO = { clientes: ["Cliente", "Clientes"], produtos: ["Produto", "P
 
 export const RAMOS = {
   oficina: {
-    cor: "#1D4ED8",
+    cor: "#2457C5",
     nome: "Oficina mecânica", ico: "🔧",
     desc: "Ordens de serviço com placa e km, peças, mão de obra e caixa.",
     menu: ["painel", "os", "clientes", "vendas", "produtos", "servicos", "caixa"],
@@ -18,7 +18,7 @@ export const RAMOS = {
     rot: { produtos: ["Peça ou produto", "Peças e produtos"], servicos: ["Serviço", "Serviços e mão de obra"] },
   },
   assistencia: {
-    cor: "#0E7490",
+    cor: "#0B7285",
     nome: "Assistência técnica", ico: "📱",
     desc: "Ordens de serviço para celulares e eletrônicos, peças, acessórios e caixa.",
     menu: ["painel", "os", "clientes", "vendas", "produtos", "servicos", "caixa"],
@@ -26,14 +26,14 @@ export const RAMOS = {
     rot: { produtos: ["Peça ou acessório", "Peças e acessórios"], servicos: ["Serviço", "Serviços e mão de obra"] },
   },
   petshop: {
-    cor: "#C2410C",
+    cor: "#C2531B",
     nome: "Pet shop", ico: "🐾",
     desc: "Agenda de banho, tosa e consulta, cadastro de pets e tutores, vendas e caixa.",
     menu: ["painel", "agenda", "clientes", "pets", "retornos", "vendas", "produtos", "servicos", "profissionais", "caixa"],
     rot: { clientes: ["Tutor", "Tutores"], servicos: ["Serviço", "Banho, tosa e consultas"], profissionais: ["Banhista ou veterinário", "Equipe"] },
   },
   salao: {
-    cor: "#BE185D",
+    cor: "#B2386A",
     nome: "Salão, barbearia e manicure", ico: "💇",
     desc: "Agenda por profissional, comissões, pacotes, aniversariantes, clientes que sumiram e caixa.",
     menu: ["painel", "agenda", "clientes", "retornos", "vendas", "servicos", "produtos", "pacotes", "profissionais", "comissoes", "caixa"],
@@ -41,7 +41,7 @@ export const RAMOS = {
     extra: { clientes: [{ k: "preferencias", l: "Preferências (fórmula de cor, corte, esmalte favorito)", t: "area" }] },
   },
   estetica: {
-    cor: "#7E22CE",
+    cor: "#6B46C1",
     nome: "Clínica de estética", ico: "✨",
     desc: "Agenda, ficha da cliente (alergias e saúde), pacotes de sessões, comissões e retornos.",
     menu: ["painel", "agenda", "clientes", "pacotes", "retornos", "vendas", "servicos", "produtos", "profissionais", "comissoes", "caixa"],
@@ -53,14 +53,14 @@ export const RAMOS = {
     ] },
   },
   restaurante: {
-    cor: "#B91C1C",
+    cor: "#B93A2B",
     nome: "Restaurante e lanchonete", ico: "🍽️",
     desc: "Comandas por mesa, cardápio, vendas de balcão e caixa.",
     menu: ["painel", "comandas", "vendas", "produtos", "clientes", "caixa"],
     rot: { produtos: ["Item do cardápio", "Cardápio"] },
   },
   loja: {
-    cor: "#4338CA",
+    cor: "#1F7A5A",
     nome: "Loja e comércio", ico: "🛍️",
     desc: "Frente de caixa, estoque com alerta de falta, clientes e caixa.",
     menu: ["painel", "vendas", "produtos", "clientes", "caixa"],
