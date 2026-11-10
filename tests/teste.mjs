@@ -26,6 +26,30 @@ ok(C.situacaoAssinatura({ status: "teste", venceEm: "2026-11-12T12:00:00Z" }, ag
 ok(!C.situacaoAssinatura({ status: "ativa", venceEm: "2026-11-01T00:00:00Z" }, agora).ok, "vencida");
 ok(!C.situacaoAssinatura({ status: "bloqueada", venceEm: "2027-01-01" }, agora).ok, "bloqueada");
 
+// relacionamento, agenda, comissões
+{
+  const cl = [{ id: "a", nome: "A", nascimento: "1990-11-05" }, { id: "b", nome: "B" }, { id: "c", nome: "C", nascimento: "1980-03-01" }];
+  const ag = [{ id: "1", clienteId: "a", data: "2026-08-01", status: "Concluído" }, { id: "2", clienteId: "b", data: "2026-09-30", status: "Concluído" }, { id: "3", clienteId: "b", data: "2026-11-20", status: "Agendado" }];
+  const sv = C.semVoltar(cl, [], ag, 45, "2026-11-10");
+  ok(sv.length === 1 && sv[0].cliente.id === "a" && sv[0].atraso === 101, "sem voltar: só quem sumiu e não tem horário marcado");
+  ok(C.semVoltar(cl, [{ clienteId: "a", dia: "2026-11-01", total: 10 }], ag, 45, "2026-11-10").length === 0, "venda recente tira da lista");
+  ok(C.aniversariantes(cl, "11").length === 1 && C.aniversariantes(cl, "11")[0].dia === 5, "aniversariantes do mês");
+  ok(C.horaMin("09:30") === 570 && C.minHora(570) === "09:30" && C.horaMin("") === -1, "hora");
+  const servs = [{ id: "s", duracao: 60 }];
+  const base = [{ id: "x", data: "2026-11-10", hora: "09:00", profissionalId: "p", servicoId: "s", status: "Agendado" }];
+  ok(C.conflito(base, { id: "n", data: "2026-11-10", hora: "09:30", profissionalId: "p", servicoId: "s" }, servs), "conflito no meio do atendimento");
+  ok(!C.conflito(base, { id: "n", data: "2026-11-10", hora: "10:00", profissionalId: "p", servicoId: "s" }, servs), "10:00 está livre");
+  ok(!C.conflito(base, { id: "n", data: "2026-11-10", hora: "09:30", profissionalId: "q", servicoId: "s" }, servs), "outro profissional não conflita");
+  ok(!C.conflito([{ ...base[0], status: "Cancelado" }], { id: "n", data: "2026-11-10", hora: "09:00", profissionalId: "p" }, servs), "cancelado libera");
+  ok(C.pacoteAtivo([{ clienteId: "a", servicoId: "s", sessoes: 4, usadas: 4 }], "a", "s") === undefined, "pacote esgotado");
+  ok(C.pacoteAtivo([{ clienteId: "a", servicoId: "s", sessoes: 4, usadas: 1 }], "a", "s"), "pacote ativo");
+  const vs = [{ dia: "2026-11-10", profissionalId: "p", itens: [{ tipo: "servico", qtd: 1, preco: 100 }, { tipo: "produto", qtd: 1, preco: 50 }] }, { dia: "2026-11-10", profissionalId: "p", cancelada: true, itens: [{ tipo: "servico", qtd: 1, preco: 999 }] }];
+  const cm = C.comissoes(vs, [{ id: "p", nome: "P", comissao: 40 }], "2026-11-10", "2026-11-10");
+  ok(cm[0].servicos === 100 && cm[0].comissao === 40 && cm[0].atend === 1, "comissão só sobre serviço e sem cancelada");
+  ok(R.camposDe("estetica", "clientes").some((c) => c.k === "alergias") && !R.camposDe("loja", "clientes").some((c) => c.k === "alergias"), "ficha só na estética");
+  ok(R.RAMO_IDS.includes("estetica") && R.RAMO_IDS.every((id) => R.RAMOS[id].cor), "todo ramo tem cor");
+}
+
 // cada ramo: dados de exemplo + todas as telas e modais
 for (const ramo of R.RAMO_IDS) {
   const db = criarLocal(); db.iniciar({ nome: "Teste " + ramo, ramo });

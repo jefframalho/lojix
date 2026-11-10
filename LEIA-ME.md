@@ -6,10 +6,15 @@ Um sistema só. O lojista cria a conta, escolhe o ramo e o menu já vem montado:
 |---|---|
 | Oficina | Ordens de serviço (placa, modelo, km), Serviços |
 | Assistência técnica | Ordens de serviço (modelo, IMEI, acessórios), Serviços |
-| Pet shop | Agenda (banho/tosa/consulta), Pets, Serviços |
-| Salão / Barbearia | Agenda com profissional, Serviços |
+| Pet shop | Agenda, Pets, Retornos, Profissionais, Serviços |
+| Salão, barbearia e manicure | Agenda em lista e grade, Profissionais, Comissões, Pacotes, Retornos e aniversários |
+| Clínica de estética | Tudo do salão + ficha da cliente (alergias, saúde, objetivo) |
 | Restaurante / Lanchonete | Comandas (mesas, 10% opcional), Cardápio |
 | Loja | PDV simples, estoque |
+
+Cada ramo tem a sua cor (muda sozinha ao escolher o ramo) e o sistema acompanha o modo claro/escuro do aparelho.
+
+**Agenda (salão, estética, pet shop):** faixa de 10 dias com a contagem de horários, filtro por profissional, visão em lista ou grade por horário (clique num horário vazio para agendar), aviso de choque de horário do mesmo profissional, confirmação por WhatsApp, "Atendido · receber" (gera a venda com a comissão) e "Faltou"/"Cancelou" que liberam a vaga. Se a cliente tem pacote pago do mesmo serviço, o sistema oferece descontar uma sessão em vez de cobrar.
 
 ## Testar agora (sem Firebase)
 Abra `index.html` por um servidor (módulos não rodam por `file://`):

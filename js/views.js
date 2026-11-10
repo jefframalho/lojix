@@ -1,8 +1,8 @@
 // Telas. Cada função só devolve HTML a partir do estado (S); os cliques ficam em app.js.
 import { S } from "./state.js";
-import { esc, brl, r2, num, numTxt, hojeStr, addDias, fmtData, fmtDM, fmtHora, diaSemana, norm } from "./util.js";
-import { totalItens, totalVenda, estoqueBaixo, resumoCaixa, situacaoAssinatura } from "./calc.js";
-import { RAMOS, ENT, PAGAMENTOS, STATUS_OS, STATUS_AG, rotulo, itemMenu } from "./ramos.js";
+import { esc, brl, r2, num, numTxt, hojeStr, addDias, fmtData, fmtDM, fmtHora, diaSemana, norm, waLink } from "./util.js";
+import { totalItens, totalVenda, estoqueBaixo, resumoCaixa, situacaoAssinatura, semVoltar, aniversariantes, horaMin, minHora, comissoes } from "./calc.js";
+import { RAMOS, ENT, PAGAMENTOS, STATUS_OS, STATUS_AG, rotulo, itemMenu, camposDe } from "./ramos.js";
 
 const R = () => RAMOS[S.ramo] || RAMOS.loja;
 const rot = (c, p) => rotulo(S.ramo, c, p);
@@ -72,6 +72,7 @@ export function vPainel() {
     + stat("Ticket médio no mês", vm.length ? brl(somar(vm) / vm.length) : "–", "por venda");
   if (tem("os")) { const ab = S.cols.os.filter((o) => o.status !== "Entregue"); cards += stat("OS em aberto", ab.length, S.cols.os.filter((o) => o.status === "Pronta").length + " prontas para retirar"); }
   if (tem("agenda")) cards += stat("Agenda de hoje", S.cols.agenda.filter((a) => a.data === hoje && a.status !== "Cancelado").length, "agendamentos");
+  if (tem("retornos")) { const an = aniversariantes(S.cols.clientes, hoje.slice(5, 7)).filter((x) => x.dia === Number(hoje.slice(8, 10))).length; cards += stat("Aniversariantes hoje", an, "para parabenizar"); }
   if (tem("comandas")) { const ab = S.cols.comandas.filter((c) => c.status === "Aberta"); cards += stat("Comandas abertas", ab.length, brl(r2(ab.reduce((a, c) => a + totalComanda(c), 0))) + " em consumo"); }
   cards += stat("Estoque baixo", baixo.length, baixo.length === 1 ? "produto" : "produtos");
 
@@ -94,11 +95,12 @@ function celula(c, o, col) {
   if (c.t === "ref") return esc(nomeDe(c.c, v)) || "–";
   if (col === "produtos" && c.k === "estoque") return o.controle === "Sim" ? `<span class="pill ${num(v) <= num(o.minimo) ? "warn" : ""}">${num(v)}</span>` : "–";
   if (c.k === "duracao") return v ? esc(v) + " min" : "–";
+  if (c.k === "comissao") return v !== "" && v != null ? esc(v) + "%" : "–";
   return esc(v) || "–";
 }
 export function vLista(col) {
   const e = ENT[col], busca = norm(S.busca[col] || "");
-  const campos = e.lista.map((k) => e.campos.find((c) => c.k === k));
+  const campos = e.lista.map((k) => camposDe(S.ramo, col).find((c) => c.k === k));
   const texto = (o) => norm(campos.map((c) => (c.t === "ref" ? nomeDe(c.c, o[c.k]) : o[c.k])).join(" "));
   const rows = S.cols[col].slice().sort((a, b) => norm(a.nome).localeCompare(norm(b.nome))).filter((o) => !busca || texto(o).includes(busca));
   const topo = cab(rot(col, true), `<input type="search" class="busca" placeholder="Buscar…" data-busca="1" value="${esc(S.busca[col] || "")}" data-col="${col}"><button class="btn pri" data-a="novo" data-col="${col}">+ Novo</button>`);
@@ -112,7 +114,7 @@ export function mForm(col, obj, titulo) {
   const e = ENT[col], novo = !obj.id;
   const rod = (novo ? "" : `<button class="btn dan" data-a="excluir" data-col="${col}" data-id="${esc(obj.id)}">Excluir</button>`)
     + `<span class="grow"></span><button class="btn" data-a="fechar">Cancelar</button><button class="btn pri" data-a="salvar" data-col="${col}" data-id="${esc(obj.id || "")}">Salvar</button>`;
-  return modal((novo ? "Novo " : "Editar ") + titulo, e.campos.map((c) => campoHTML(c, obj[c.k])).join(""), rod);
+  return modal((novo ? "Novo " : "Editar ") + titulo, camposDe(S.ramo, col).map((c) => campoHTML(c, obj[c.k])).join(""), rod);
 }
 
 // ---------- vender (PDV) ----------
@@ -196,31 +198,137 @@ export function opcoesPets(clienteId, sel) {
   const l = S.cols.pets.filter((p) => !clienteId || p.clienteId === clienteId);
   return `<option value="">—</option>` + l.map((p) => opcao([p.id, p.nome + (p.raca ? " (" + p.raca + ")" : "")], sel)).join("");
 }
+
+// ---------- agenda ----------
+const SEMANA = ["dom", "seg", "ter", "qua", "qui", "sex", "sáb"];
+const ativo = (a) => a.status !== "Cancelado" && a.status !== "Faltou";
+
+function faixaDias(dia) {
+  const ini = S.agIni || hojeStr(), hoje = hojeStr();
+  let h = "";
+  for (let i = 0; i < 10; i++) {
+    const d = addDias(ini, i), n = S.cols.agenda.filter((a) => a.data === d && ativo(a)).length, dt = new Date(d + "T00:00:00");
+    h += `<button class="day${d === dia ? " on" : ""}${d === hoje ? " hoje" : ""}" data-a="ag-ir" data-d="${d}"><small>${d === hoje ? "hoje" : SEMANA[dt.getDay()]}</small><b>${dt.getDate()}</b><small>${n ? n + (n === 1 ? " horário" : " horários") : "livre"}</small></button>`;
+  }
+  return `<div class="dias"><button class="btn sm" data-a="ag-faixa" data-n="-7" aria-label="Semana anterior">‹</button><div class="faixa">${h}</div><button class="btn sm" data-a="ag-faixa" data-n="7" aria-label="Próxima semana">›</button></div>`;
+}
+function filtroProf() {
+  const profs = S.cols.profissionais;
+  if (profs.length < 2) return "";
+  const chip = (id, t) => `<button class="chip${S.agProf === id ? " on" : ""}" data-a="ag-prof" data-p="${esc(id)}">${esc(t)}</button>`;
+  return `<div class="chips">${chip("todos", "Todos")}${profs.slice().sort((a, b) => norm(a.nome).localeCompare(norm(b.nome))).map((p) => chip(p.id, p.nome)).join("")}</div>`;
+}
+function acoesAg(a) {
+  const id = esc(a.id), b = (cls, ac, t, extra) => `<button class="btn sm ${cls}" data-a="${ac}" data-id="${id}"${extra || ""}>${t}</button>`;
+  const c = achar("clientes", a.clienteId), sv = achar("servicos", a.servicoId);
+  const zap = c && c.telefone ? `<a class="btn sm wa" target="_blank" rel="noopener" href="${waLink(c.telefone, `Olá, ${c.nome}! Confirmando seu horário${sv ? " de " + sv.nome : ""} em ${fmtData(a.data)} às ${a.hora}. Podemos confirmar? — ${S.empresa.nome}`)}">WhatsApp</a>` : "";
+  if (a.status === "Agendado") return zap + b("", "ag-st", "Confirmou", ' data-st="Confirmado"') + b("", "ag-st", "Cancelou", ' data-st="Cancelado"');
+  if (a.status === "Confirmado") return b("pri", "ag-receber", "Atendido · receber") + b("", "ag-st", "Faltou", ' data-st="Faltou"') + b("", "ag-st", "Cancelou", ' data-st="Cancelado"');
+  if (a.status === "Cancelado" || a.status === "Faltou") return b("", "ag-abrir", "Remarcar") + b("", "ag-liberar", "Liberar vaga");
+  return a.vendaId ? `<span class="dim">Recebido</span>` : a.pacoteId ? `<span class="dim">Sessão do pacote</span>` : "";
+}
+function listaAg(itens) {
+  return itens.map((a) => {
+    const sv = achar("servicos", a.servicoId), pet = nomeDe("pets", a.petId);
+    return `<div class="ag st-${esc(norm(a.status))}"><span class="hora">${esc(a.hora || "--:--")}</span>
+      <button class="ag-c" data-a="ag-abrir" data-id="${esc(a.id)}"><b>${esc(nomeDe("clientes", a.clienteId) || "Sem cliente")}${pet ? " · " + esc(pet) : ""}</b><span>${esc(sv ? sv.nome + " · " + brl(num(sv.preco)) : "Sem serviço")}${a.profissional ? " · " + esc(a.profissional) : ""}</span></button>
+      <div class="ag-acts"><span class="pill st-${esc(norm(a.status))}">${esc(a.status)}</span>${acoesAg(a)}</div></div>`;
+  }).join("");
+}
+function gradeAg(itens, dia) {
+  let cols = S.cols.profissionais.slice().sort((a, b) => norm(a.nome).localeCompare(norm(b.nome)));
+  if (S.agProf !== "todos") cols = cols.filter((p) => p.id === S.agProf);
+  const semProf = itens.some((a) => !a.profissionalId || !cols.some((p) => p.id === a.profissionalId));
+  const colunas = cols.map((p) => ({ id: p.id, nome: p.nome })).concat(semProf || !cols.length ? [{ id: "", nome: cols.length ? "Sem profissional" : "Agenda" }] : []);
+  const dur = (a) => num((achar("servicos", a.servicoId) || {}).duracao) || 30;
+  let ini = 8 * 60, fim = 19 * 60;
+  itens.forEach((a) => { const m = horaMin(a.hora); if (m >= 0) { ini = Math.min(ini, Math.floor(m / 60) * 60); fim = Math.max(fim, Math.ceil((m + dur(a)) / 60) * 60); } });
+  const linhas = Math.round((fim - ini) / 30);
+  let h = `<div class="gh"></div>` + colunas.map((c, i) => `<div class="gh" style="grid-column:${i + 2}">${esc(c.nome)}</div>`).join("");
+  for (let r = 0; r < linhas; r++) {
+    const m = ini + r * 30;
+    h += `<div class="gt${m % 60 ? " meia" : ""}" style="grid-row:${r + 2}">${minHora(m)}</div>`;
+    colunas.forEach((c, i) => { h += `<button class="gc${m % 60 ? " meia" : ""}" style="grid-row:${r + 2};grid-column:${i + 2}" data-a="ag-novo-em" data-h="${minHora(m)}" data-p="${esc(c.id)}" aria-label="Agendar ${minHora(m)}"></button>`; });
+  }
+  itens.forEach((a) => {
+    const m = horaMin(a.hora); if (m < 0) return;
+    let ci = colunas.findIndex((c) => c.id && c.id === a.profissionalId); if (ci < 0) ci = colunas.findIndex((c) => !c.id); if (ci < 0) return;
+    const r = Math.floor((m - ini) / 30) + 2, span = Math.max(1, Math.ceil(dur(a) / 30)), sv = achar("servicos", a.servicoId);
+    h += `<button class="gev st-${esc(norm(a.status))}" style="grid-row:${r} / span ${span};grid-column:${ci + 2}" data-a="ag-abrir" data-id="${esc(a.id)}"><b>${esc(a.hora)} ${esc(nomeDe("clientes", a.clienteId) || "Sem cliente")}</b><small>${esc(sv ? sv.nome : "")}</small></button>`;
+  });
+  return `<div class="gradeag" style="--n:${colunas.length};--l:${linhas}">${h}</div>`;
+}
 export function vAgenda() {
   const dia = S.dia || hojeStr();
-  const lista = S.cols.agenda.filter((a) => a.data === dia).sort((a, b) => (a.hora || "").localeCompare(b.hora || ""));
-  const cards = lista.length ? lista.map((a) => {
-    const sv = achar("servicos", a.servicoId), pet = nomeDe("pets", a.petId);
-    return `<button class="ag st-${esc(norm(a.status))}" data-a="ag-abrir" data-id="${esc(a.id)}"><span class="hora">${esc(a.hora || "--:--")}</span>
-      <span class="ag-c"><b>${esc(nomeDe("clientes", a.clienteId) || "Sem cliente")}${pet ? " · " + esc(pet) : ""}</b><span>${esc(sv ? sv.nome + " · " + brl(num(sv.preco)) : "Sem serviço")}${a.profissional ? " · " + esc(a.profissional) : ""}</span></span>
-      <span class="pill">${esc(a.status)}</span></button>`;
-  }).join("") : vazio("Nenhum agendamento neste dia.", `<button class="btn pri" data-a="ag-novo">+ Agendar</button>`);
-  return cab("Agenda", `<button class="btn pri" data-a="ag-novo">+ Agendar</button>`) + `<div class="dianav"><button class="btn" data-a="ag-dia" data-d="-1" aria-label="Dia anterior">‹</button>
-    <div><b>${fmtData(dia)}</b><span class="dim"> · ${diaSemana(dia)}${dia === hojeStr() ? " (hoje)" : ""}</span></div>
-    <button class="btn" data-a="ag-dia" data-d="1" aria-label="Próximo dia">›</button><button class="btn" data-a="ag-dia" data-d="0">Hoje</button></div><div class="aglist">${cards}</div>`;
+  if (S.agProf !== "todos" && !S.cols.profissionais.some((p) => p.id === S.agProf)) S.agProf = "todos";
+  const itens = S.cols.agenda.filter((a) => a.data === dia && (S.agProf === "todos" || a.profissionalId === S.agProf)).sort((a, b) => (a.hora || "").localeCompare(b.hora || ""));
+  const livres = itens.filter((a) => !ativo(a)).length, marcados = itens.length - livres;
+  const modo = (id, t) => `<button class="chip${S.agView === id ? " on" : ""}" data-a="ag-modo" data-m="${id}">${t}</button>`;
+  const corpo = S.agView === "grade" ? gradeAg(itens, dia)
+    : itens.length ? `<div class="aglist">${listaAg(itens)}</div>` : vazio("Nenhum agendamento neste dia.", `<button class="btn pri" data-a="ag-novo">+ Agendar</button>`);
+  return cab("Agenda", `<div class="chips">${modo("lista", "Lista")}${modo("grade", "Grade")}</div><button class="btn pri" data-a="ag-novo">+ Agendar</button>`)
+    + faixaDias(dia) + `<div class="agbar"><div><b>${fmtData(dia)}</b><span class="dim"> · ${diaSemana(dia)}${dia === hojeStr() ? " (hoje)" : ""} · ${marcados} ${marcados === 1 ? "horário" : "horários"}${livres ? ` · ${livres} ${livres === 1 ? "vaga liberada" : "vagas liberadas"}` : ""}</span></div>${filtroProf()}</div>` + corpo;
 }
 export function mAgenda(a) {
-  const novo = !a.id, pets = tem("pets");
+  const novo = !a.id, pets = tem("pets"), profs = S.cols.profissionais;
+  const profCampo = profs.length
+    ? `<label class="fld"><span>Profissional</span><select id="f_profissionalId" name="profissionalId"><option value="">—</option>${profs.map((p) => opcao([p.id, p.nome], a.profissionalId)).join("")}</select></label>`
+    : campoHTML({ k: "profissional", l: "Profissional" }, a.profissional);
   const corpo = `<div class="g2">${campoHTML({ k: "data", l: "Dia", t: "date", req: true }, a.data)}${campoHTML({ k: "hora", l: "Horário", t: "time", req: true }, a.hora)}</div>
     <label class="fld"><span>${esc(rot("clientes", false))}</span><select id="f_clienteId" name="clienteId" data-ch="ag-cliente"><option value="">—</option>${S.cols.clientes.slice().sort((x, y) => norm(x.nome).localeCompare(norm(y.nome))).map((c) => opcao([c.id, c.nome], a.clienteId)).join("")}</select></label>
     ${pets ? `<label class="fld"><span>Pet</span><select id="f_petId" name="petId">${opcoesPets(a.clienteId, a.petId)}</select></label>` : ""}
-    <label class="fld"><span>Serviço</span><select id="f_servicoId" name="servicoId"><option value="">—</option>${S.cols.servicos.map((s) => opcao([s.id, s.nome + " · " + brl(num(s.preco))], a.servicoId)).join("")}</select></label>
-    <div class="g2">${campoHTML({ k: "profissional", l: "Profissional" }, a.profissional)}<label class="fld"><span>Situação</span><select id="f_status" name="status">${STATUS_AG.map((s) => opcao(s, a.status || "Agendado")).join("")}</select></label></div>
+    <label class="fld"><span>${esc(rot("servicos", false))}</span><select id="f_servicoId" name="servicoId"><option value="">—</option>${S.cols.servicos.map((s) => opcao([s.id, s.nome + " · " + brl(num(s.preco))], a.servicoId)).join("")}</select></label>
+    <div class="g2">${profCampo}<label class="fld"><span>Situação</span><select id="f_status" name="status">${STATUS_AG.map((s) => opcao(s, a.status || "Agendado")).join("")}</select></label></div>
     ${campoHTML({ k: "obs", l: "Observações", t: "area" }, a.obs)}`;
   const fim = a.status === "Concluído" || a.status === "Cancelado";
   const rod = (novo ? "" : `<button class="btn dan" data-a="ag-excluir" data-id="${esc(a.id)}">Excluir</button><button class="btn" data-a="ag-zap">Avisar no WhatsApp</button>`)
     + `<span class="grow"></span><button class="btn" data-a="fechar">Cancelar</button><button class="btn" data-a="ag-salvar">Salvar</button>` + (fim ? "" : `<button class="btn pri" data-a="ag-concluir">Concluir e receber</button>`);
   return modal(novo ? "Novo agendamento" : "Agendamento", corpo, rod);
+}
+
+// ---------- pacotes de sessões ----------
+export function vPacotes() {
+  const l = S.cols.pacotes.slice().sort((a, b) => ((Number(a.usadas) || 0) >= (Number(a.sessoes) || 0)) - ((Number(b.usadas) || 0) >= (Number(b.sessoes) || 0)) || norm(nomeDe("clientes", a.clienteId)).localeCompare(norm(nomeDe("clientes", b.clienteId))));
+  const topo = cab("Pacotes de sessões", `<button class="btn pri" data-a="novo" data-col="pacotes">+ Novo pacote</button>`);
+  if (!l.length) return topo + vazio("Venda pacotes (ex.: 10 sessões de drenagem) e acompanhe quantas faltam.", `<button class="btn pri" data-a="novo" data-col="pacotes">Criar o primeiro pacote</button>`);
+  const cards = l.map((p) => {
+    const tot = Number(p.sessoes) || 0, us = Number(p.usadas) || 0, falta = Math.max(0, tot - us), pct = tot ? Math.min(100, Math.round(us / tot * 100)) : 0, ok = p.pago === "Sim";
+    return `<div class="pac${falta ? "" : " fim"}"><div class="pac-t"><b>${esc(nomeDe("clientes", p.clienteId) || "Sem cliente")}</b><span class="pill ${ok ? "" : "warn"}">${ok ? "Pago" : "A receber"}</span></div>
+      <div class="dim">${esc(nomeDe("servicos", p.servicoId) || "Serviço")} · ${brl(num(p.valor))}</div>
+      <div class="barra" role="img" aria-label="${us} de ${tot} sessões usadas"><i style="width:${pct}%"></i></div>
+      <div class="pac-n"><b>${us}</b> de ${tot} usadas · ${falta ? `faltam <b>${falta}</b>` : "concluído"}</div>
+      <div class="row">${falta ? `<button class="btn sm pri" data-a="pac-usar" data-id="${esc(p.id)}">Usar 1 sessão</button>` : ""}${ok ? "" : `<button class="btn sm" data-a="pac-receber" data-id="${esc(p.id)}">Receber</button>`}<button class="btn sm" data-a="editar" data-col="pacotes" data-id="${esc(p.id)}">Editar</button></div></div>`;
+  }).join("");
+  return topo + `<div class="pacs">${cards}</div>`;
+}
+
+// ---------- retornos e aniversários ----------
+export function vRetornos() {
+  const hoje = hojeStr(), dias = S.retDias || 45, emp = S.empresa.nome;
+  const aniv = aniversariantes(S.cols.clientes, hoje.slice(5, 7)), hd = Number(hoje.slice(8, 10));
+  const zap = (c, msg, t) => (c.telefone ? `<a class="btn sm wa" target="_blank" rel="noopener" href="${waLink(c.telefone, msg)}">${t}</a>` : `<span class="dim">sem WhatsApp</span>`);
+  const nome1 = (c) => String(c.nome || "").split(" ")[0];
+  const aLinhas = aniv.length ? aniv.map((x) => `<div class="li${x.dia === hd ? " destaque" : ""}"><span><b>${String(x.dia).padStart(2, "0")}/${hoje.slice(5, 7)}</b> · ${esc(x.cliente.nome)}${x.dia === hd ? ` <span class="pill">hoje 🎉</span>` : ""}</span>${zap(x.cliente, `Parabéns, ${nome1(x.cliente)}! 🎉 Toda a equipe do ${emp} deseja um dia lindo, cheio de alegria. Um beijo!`, "Parabenizar")}</div>`).join("")
+    : `<p class="vazio">Nenhum aniversariante neste mês. Cadastre o aniversário no cadastro do cliente.</p>`;
+  const sv = semVoltar(S.cols.clientes, S.cols.vendas, S.cols.agenda, dias, hoje);
+  const chip = (n) => `<button class="chip${dias === n ? " on" : ""}" data-a="ret-dias" data-n="${n}">${n} dias</button>`;
+  const sLinhas = sv.length ? sv.map((x) => `<div class="li"><span><b>${esc(x.cliente.nome)}</b><br><small>Última visita ${fmtData(x.ult)} · há ${x.atraso} dias</small></span><span class="row">${zap(x.cliente, `Olá, ${nome1(x.cliente)}! Aqui é do ${emp}. Faz um tempinho que não te vemos por aqui 💜 Vamos marcar um horário?`, "Chamar")}<button class="btn sm" data-a="ag-novo-cli" data-id="${esc(x.cliente.id)}">Agendar</button></span></div>`).join("")
+    : `<p class="vazio">Ninguém sumiu há mais de ${dias} dias. Os clientes aparecem aqui depois do primeiro atendimento ou venda.</p>`;
+  return cab("Retornos e aniversários") + `<div class="cols2"><div class="panel"><h3>Aniversariantes do mês</h3>${aLinhas}</div>
+    <div class="panel"><div class="ph"><h3>Sem voltar há mais de…</h3><div class="chips">${chip(30)}${chip(45)}${chip(60)}${chip(90)}</div></div>${sLinhas}</div></div>`;
+}
+
+// ---------- comissões ----------
+export function vComissoes() {
+  const [de, ate] = periodoCaixa(S.caixa), l = comissoes(S.cols.vendas, S.cols.profissionais, de, ate);
+  const chip = (id, t) => `<button class="chip${S.caixa === id ? " on" : ""}" data-a="caixa-per" data-p="${id}">${t}</button>`;
+  const topo = cab("Comissões", `<div class="chips">${chip("hoje", "Hoje")}${chip("semana", "7 dias")}${chip("mes", "Este mês")}</div>`);
+  if (!S.cols.profissionais.length) return topo + vazio("Cadastre a equipe e a porcentagem de comissão de cada um.", `<button class="btn pri" data-a="ir" data-rota="profissionais">Cadastrar profissionais</button>`);
+  const totServ = r2(l.reduce((a, x) => a + x.servicos, 0)), totCom = r2(l.reduce((a, x) => a + x.comissao, 0));
+  const linhas = l.slice().sort((a, b) => b.servicos - a.servicos).map((x) => `<tr><td data-l="Profissional"><b>${esc(x.prof.nome)}</b></td><td data-l="Atendimentos">${x.atend}</td><td data-l="Serviços">${brl(x.servicos)}</td><td data-l="Comissão">${num(x.prof.comissao)}%</td><td data-l="A pagar"><b>${brl(x.comissao)}</b></td></tr>`).join("");
+  return topo + `<div class="stats">${stat("Serviços com profissional", brl(totServ), "no período")}${stat("Comissões a pagar", brl(totCom))}</div>
+    <div class="tbl"><table><thead><tr><th>Profissional</th><th>Atendimentos</th><th>Serviços</th><th>Comissão</th><th>A pagar</th></tr></thead><tbody>${linhas}</tbody></table></div>
+    <p class="hint">A comissão vem dos atendimentos da agenda concluídos e recebidos, calculada só sobre os serviços (produtos não entram).</p>`;
 }
 
 // ---------- comandas (restaurante) ----------
@@ -299,6 +407,9 @@ export function telaAtual() {
   if (r === "caixa") return vCaixa();
   if (r === "os") return vOS();
   if (r === "agenda") return vAgenda();
+  if (r === "pacotes") return vPacotes();
+  if (r === "retornos") return vRetornos();
+  if (r === "comissoes") return vComissoes();
   if (r === "comandas") return vComandas();
   if (r === "conta") return vConta();
   if (r === "admin") return vAdmin();

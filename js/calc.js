@@ -50,3 +50,61 @@ export function situacaoAssinatura(a, agora) {
   const dias = Math.ceil((ate - (agora || new Date())) / 864e5);
   return { ok: true, dias, txt: (a.status === "teste" ? "Teste grátis" : "Ativa") + " · " + dias + (dias === 1 ? " dia restante" : " dias restantes") };
 }
+
+// ---------- relacionamento (retornos, aniversários) ----------
+const diasEntre = (a, b) => Math.round((new Date(b + "T00:00:00") - new Date(a + "T00:00:00")) / 864e5);
+
+// Data da última visita do cliente: vendas não canceladas ou atendimentos concluídos na agenda
+export function ultimaVisita(clienteId, vendas, agenda) {
+  let ult = "";
+  (vendas || []).forEach((v) => { if (v.clienteId === clienteId && !v.cancelada && v.dia > ult) ult = v.dia; });
+  (agenda || []).forEach((a) => { if (a.clienteId === clienteId && a.status === "Concluído" && a.data > ult) ult = a.data; });
+  return ult;
+}
+
+// Clientes que já vieram, mas não voltam há mais de N dias (e não têm nada marcado daqui para frente)
+export function semVoltar(clientes, vendas, agenda, dias, hoje) {
+  return (clientes || []).map((c) => {
+    const ult = ultimaVisita(c.id, vendas, agenda);
+    const marcado = (agenda || []).some((a) => a.clienteId === c.id && a.data >= hoje && a.status !== "Cancelado" && a.status !== "Faltou");
+    return { cliente: c, ult, atraso: ult ? diasEntre(ult, hoje) : 0, marcado };
+  }).filter((x) => x.ult && !x.marcado && x.atraso > dias).sort((a, b) => b.atraso - a.atraso);
+}
+
+// Aniversariantes do mês (mm = "01".."12"), do dia 1 ao 31
+export function aniversariantes(clientes, mm) {
+  return (clientes || []).filter((c) => c.nascimento && c.nascimento.slice(5, 7) === mm)
+    .map((c) => ({ cliente: c, dia: Number(c.nascimento.slice(8, 10)), ano: Number(c.nascimento.slice(0, 4)) }))
+    .sort((a, b) => a.dia - b.dia);
+}
+
+// ---------- agenda ----------
+export const horaMin = (h) => { const m = /^(\d{1,2}):(\d{2})/.exec(h || ""); return m ? Number(m[1]) * 60 + Number(m[2]) : -1; };
+export const minHora = (m) => String(Math.floor(m / 60)).padStart(2, "0") + ":" + String(m % 60).padStart(2, "0");
+
+// Pacote ainda com sessões, do mesmo cliente e serviço
+export function pacoteAtivo(pacotes, clienteId, servicoId) {
+  return (pacotes || []).find((p) => p.clienteId === clienteId && p.servicoId === servicoId && (Number(p.sessoes) || 0) > (Number(p.usadas) || 0));
+}
+
+// Comissão por profissional no período: percentual sobre os itens de serviço das vendas
+export function comissoes(vendas, profissionais, de, ate) {
+  const out = {};
+  (profissionais || []).forEach((p) => { out[p.id] = { prof: p, atend: 0, servicos: 0, comissao: 0 }; });
+  (vendas || []).filter((v) => !v.cancelada && v.profissionalId && v.dia >= de && v.dia <= ate).forEach((v) => {
+    const o = out[v.profissionalId]; if (!o) return;
+    const sv = r2((v.itens || []).filter((i) => i.tipo === "servico").reduce((a, i) => a + (Number(i.qtd) || 0) * (Number(i.preco) || 0), 0));
+    o.atend += 1; o.servicos = r2(o.servicos + sv);
+  });
+  Object.values(out).forEach((o) => { o.comissao = r2(o.servicos * (num(o.prof.comissao) / 100)); });
+  return Object.values(out);
+}
+
+// Outro atendimento do mesmo profissional que bate com o horário de "a" (ou null)
+export function conflito(agenda, a, servicos) {
+  if (!a.profissionalId || horaMin(a.hora) < 0) return null;
+  const dur = (x) => Number((((servicos || []).find((s) => s.id === x.servicoId)) || {}).duracao) || 30;
+  const i1 = horaMin(a.hora), f1 = i1 + dur(a);
+  return (agenda || []).find((o) => o.id !== a.id && o.data === a.data && o.profissionalId === a.profissionalId
+    && o.status !== "Cancelado" && o.status !== "Faltou" && horaMin(o.hora) >= 0 && horaMin(o.hora) < f1 && horaMin(o.hora) + dur(o) > i1) || null;
+}

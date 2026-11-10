@@ -1,8 +1,8 @@
 // Entrada do sistema: login, escolha do ramo, assinatura e os cliques de todas as telas.
 import { S, COLS } from "./state.js";
 import { esc, brl, r2, num, hojeStr, addDias, fmtData, waLink, norm } from "./util.js";
-import { totalItens, totalVenda, numeroProximo, addItem, ajustesEstoque, situacaoAssinatura } from "./calc.js";
-import { RAMOS, RAMO_IDS, ENT, exemplos, rotulo } from "./ramos.js";
+import { totalItens, totalVenda, numeroProximo, addItem, ajustesEstoque, situacaoAssinatura, pacoteAtivo, conflito } from "./calc.js";
+import { RAMOS, RAMO_IDS, ENT, exemplos, rotulo, camposDe } from "./ramos.js";
 import { criarLocal, criarNuvem } from "./data.js";
 import { firebaseConfig, configurado, PRODUTO } from "./config.js";
 import * as V from "./views.js";
@@ -35,6 +35,7 @@ function render() {
   $("#view").innerHTML = V.telaAtual();
   $("#emp").textContent = S.empresa.nome;
   const r = RAMOS[S.ramo];
+  document.documentElement.style.setProperty("--brand", r.cor || "#4338CA");
   $("#ramo").textContent = r.ico + " " + r.nome;
   document.title = S.empresa.nome + " · " + PRODUTO.nome;
 }
@@ -98,7 +99,7 @@ async function entrarUsuario(u) {
 // ---------- aplicativo ----------
 async function iniciarApp(emp) {
   desligar();
-  S.empresa = emp; S.ramo = RAMOS[emp.ramo] ? emp.ramo : "loja"; S.rota = "painel"; S.dia = hojeStr(); S.assinantes = null;
+  S.empresa = emp; S.ramo = RAMOS[emp.ramo] ? emp.ramo : "loja"; S.rota = "painel"; S.dia = hojeStr(); S.agIni = S.dia; S.agProf = "todos"; S.agView = "lista"; S.assinantes = null;
   S.pdv = { itens: [], desc: "", pag: "Dinheiro", cliente: "" };
   S.ehAdmin = await S.dados.admin.ehAdmin();
   $("#root").innerHTML = `<div class="app"><aside class="side" id="side"><div class="side-top"><div class="logo">${esc(PRODUTO.nome)}</div><b id="emp"></b><span id="ramo" class="dim"></span></div><nav id="nav"></nav></aside>
@@ -124,9 +125,9 @@ function aplicarAssinatura() {
 }
 
 // ---------- vendas ----------
-async function finalizarVenda({ itens, desc, pag, clienteId, origem, origemId }) {
+async function finalizarVenda({ itens, desc, pag, clienteId, origem, origemId, profissionalId }) {
   const lista = itens.map((i) => ({ ...i }));
-  const v = { numero: numeroProximo(S.cols.vendas), dia: hojeStr(), em: new Date().toISOString(), itens: lista, desconto: r2(desc), total: totalVenda(lista, desc), pagamento: pag, clienteId: clienteId || "", origem, origemId: origemId || "", cancelada: false };
+  const v = { numero: numeroProximo(S.cols.vendas), dia: hojeStr(), em: new Date().toISOString(), itens: lista, desconto: r2(desc), total: totalVenda(lista, desc), pagamento: pag, clienteId: clienteId || "", profissionalId: profissionalId || "", origem, origemId: origemId || "", cancelada: false };
   const salvo = await S.dados.salvar("vendas", v);
   for (const a of ajustesEstoque(S.cols.produtos, lista, -1)) await S.dados.incrementar("produtos", a.id, "estoque", a.delta);
   return salvo;
@@ -143,7 +144,7 @@ function lerCampos(campos) {
   }
   return out;
 }
-const padraoNovo = (col) => (col === "produtos" ? { controle: "Não", estoque: 0, minimo: 0 } : {});
+const padraoNovo = (col) => (col === "produtos" ? { controle: "Não", estoque: 0, minimo: 0 } : col === "pacotes" ? { usadas: 0, pago: "Não" } : {});
 const tituloForm = (col) => (col === "lancamentos" ? "lançamento" : rotulo(S.ramo, col, false).toLowerCase());
 function abrirForm(col, obj) { abrirModal(V.mForm(col, obj, tituloForm(col))); }
 
@@ -160,7 +161,8 @@ function lerAgenda() {
   const g = (k) => { const el = $("#f_" + k); return el ? el.value.trim() : ""; };
   if (!g("data") || !g("hora")) { toast("Informe o dia e o horário."); return null; }
   const base = S.m.id ? achar("agenda", S.m.id) || {} : {};
-  return { ...base, data: g("data"), hora: g("hora"), clienteId: g("clienteId"), petId: g("petId"), servicoId: g("servicoId"), profissional: g("profissional"), status: g("status") || "Agendado", obs: g("obs") };
+  const pf = achar("profissionais", g("profissionalId"));
+  return { ...base, data: g("data"), hora: g("hora"), clienteId: g("clienteId"), petId: g("petId"), servicoId: g("servicoId"), profissionalId: pf ? pf.id : "", profissional: pf ? pf.nome : g("profissional"), status: g("status") || "Agendado", obs: g("obs") };
 }
 function lerComanda() {
   const nome = ($("#f_nome").value || "").trim();
@@ -177,6 +179,24 @@ function itensRender() {
 function itemDoCatalogo(t, r) { return V.catalogo().find((c) => c.tipo === t && c.refId === r); }
 const cartRender = () => { const c = $("#pdv-cart"); if (c) c.innerHTML = V.pdvCart(); };
 const nomeNeg = () => S.empresa.nome;
+const nomeDe2 = (col, id) => { const x = achar(col, id); return x ? x.nome : ""; };
+
+// Atendimento feito: usa uma sessão do pacote do cliente, se houver, ou abre o recebimento
+async function receberAgenda(a) {
+  const sv = achar("servicos", a.servicoId);
+  if (!sv) { toast("Escolha o serviço para cobrar."); S.m = { tipo: "ag", id: a.id }; abrirModal(V.mAgenda(a)); return; }
+  const pac = pacoteAtivo(S.cols.pacotes, a.clienteId, a.servicoId);
+  if (pac && pac.pago === "Sim" && confirm("Essa cliente tem um pacote de " + sv.nome + " (" + (Number(pac.usadas) || 0) + " de " + pac.sessoes + " usadas).\n\nDescontar uma sessão do pacote, sem cobrar de novo?")) {
+    const ok = await seguro(async () => {
+      await S.dados.salvar("pacotes", { ...pac, usadas: (Number(pac.usadas) || 0) + 1 });
+      await S.dados.salvar("agenda", { ...a, status: "Concluído", pacoteId: pac.id });
+      return true;
+    });
+    if (ok) { fecharModal(); toast("Sessão descontada do pacote."); }
+    return;
+  }
+  S.pag = { tipo: "ag", obj: a, sv }; abrirModal(V.mPagamento("Concluir e receber · " + sv.nome, num(sv.preco)));
+}
 
 // ---------- exemplos, cópia dos dados, assinantes ----------
 async function carregarExemplos(silencioso) {
@@ -213,7 +233,7 @@ const ACOES = {
   novo(el) { abrirForm(el.dataset.col, padraoNovo(el.dataset.col)); },
   editar(el) { const o = achar(el.dataset.col, el.dataset.id); if (o) abrirForm(el.dataset.col, o); },
   async salvar(el) {
-    const col = el.dataset.col, id = el.dataset.id, r = lerCampos(ENT[col].campos);
+    const col = el.dataset.col, id = el.dataset.id, r = lerCampos(camposDe(S.ramo, col));
     if (!r) return;
     const obj = { ...(id ? achar(col, id) || {} : {}), ...r };
     if (id) obj.id = id;
@@ -290,26 +310,46 @@ const ACOES = {
   },
 
   // agenda
-  "ag-dia"(el) { const d = +el.dataset.d; S.dia = d === 0 ? hojeStr() : addDias(S.dia || hojeStr(), d); render(); },
-  "ag-novo"() { S.m = { tipo: "ag" }; abrirModal(V.mAgenda({ data: S.dia || hojeStr(), hora: "", status: "Agendado" })); },
+  "ag-ir"(el) { S.dia = el.dataset.d; render(); },
+  "ag-faixa"(el) { S.agIni = addDias(S.agIni || hojeStr(), +el.dataset.n); render(); },
+  "ag-prof"(el) { S.agProf = el.dataset.p; render(); },
+  "ag-modo"(el) { S.agView = el.dataset.m; render(); },
+  "ag-novo"() { S.m = { tipo: "ag" }; abrirModal(V.mAgenda({ data: S.dia || hojeStr(), hora: "", status: "Agendado", profissionalId: S.agProf !== "todos" ? S.agProf : "" })); },
+  "ag-novo-em"(el) { S.m = { tipo: "ag" }; abrirModal(V.mAgenda({ data: S.dia || hojeStr(), hora: el.dataset.h, status: "Agendado", profissionalId: el.dataset.p })); },
+  "ag-novo-cli"(el) { S.rota = "agenda"; S.m = { tipo: "ag" }; render(); abrirModal(V.mAgenda({ data: S.dia || hojeStr(), hora: "", status: "Agendado", clienteId: el.dataset.id })); },
   "ag-abrir"(el) { const a = achar("agenda", el.dataset.id); if (!a) return; S.m = { tipo: "ag", id: a.id }; abrirModal(V.mAgenda(a)); },
-  async "ag-salvar"() { const a = lerAgenda(); if (a && (await seguro(() => S.dados.salvar("agenda", a)))) { fecharModal(); toast("Agendamento salvo."); } },
+  async "ag-salvar"() {
+    const a = lerAgenda(); if (!a) return;
+    const bate = conflito(S.cols.agenda, a, S.cols.servicos);
+    if (bate && !confirm((a.profissional || "Esse profissional") + " já tem " + (achar("servicos", bate.servicoId) || { nome: "um atendimento" }).nome + " às " + bate.hora + ". Agendar mesmo assim?")) return;
+    if (await seguro(() => S.dados.salvar("agenda", a))) { fecharModal(); toast("Agendamento salvo."); }
+  },
   async "ag-excluir"(el) {
     if (!confirm("Excluir este agendamento?")) return;
     if ((await seguro(() => S.dados.apagar("agenda", el.dataset.id))) !== null) { fecharModal(); toast("Agendamento excluído."); }
   },
+  async "ag-liberar"(el) { const a = achar("agenda", el.dataset.id); if (a && (await seguro(() => S.dados.apagar("agenda", a.id))) !== null) toast("Vaga liberada."); },
+  async "ag-st"(el) { const a = achar("agenda", el.dataset.id); if (a && (await seguro(() => S.dados.salvar("agenda", { ...a, status: el.dataset.st }))) !== null) toast({ Confirmado: "Horário confirmado.", Cancelado: "Horário cancelado. A vaga ficou livre.", Faltou: "Falta registrada." }[el.dataset.st] || "Atualizado."); },
   "ag-zap"() {
     const c = achar("clientes", $("#f_clienteId").value), sv = achar("servicos", $("#f_servicoId").value);
     if (!c || !c.telefone) { toast("Esse cliente não tem WhatsApp cadastrado."); return; }
     const txt = `Olá, ${c.nome}! Confirmando seu horário${sv ? " de " + sv.nome : ""} em ${fmtData($("#f_data").value)} às ${$("#f_hora").value}. Podemos confirmar? — ${nomeNeg()}`;
     window.open(waLink(c.telefone, txt), "_blank", "noopener");
   },
-  async "ag-concluir"() {
-    const a = lerAgenda(); if (!a) return;
-    const sv = achar("servicos", a.servicoId); if (!sv) { toast("Escolha o serviço para cobrar."); return; }
-    const s = await seguro(() => S.dados.salvar("agenda", a)); if (!s) return;
-    S.pag = { tipo: "ag", obj: s, sv }; abrirModal(V.mPagamento("Concluir e receber · " + sv.nome, num(sv.preco)));
+  async "ag-concluir"() { const a = lerAgenda(); if (!a) return; const s = await seguro(() => S.dados.salvar("agenda", a)); if (s) await receberAgenda(s); },
+  async "ag-receber"(el) { const a = achar("agenda", el.dataset.id); if (a) await receberAgenda(a); },
+
+  // pacotes de sessões
+  async "pac-usar"(el) {
+    const p = achar("pacotes", el.dataset.id); if (!p) return;
+    if ((Number(p.usadas) || 0) >= (Number(p.sessoes) || 0)) { toast("Esse pacote já foi todo usado."); return; }
+    if (await seguro(() => S.dados.salvar("pacotes", { ...p, usadas: (Number(p.usadas) || 0) + 1 }))) toast("Sessão registrada.");
   },
+  "pac-receber"(el) {
+    const p = achar("pacotes", el.dataset.id); if (!p) return;
+    S.pag = { tipo: "pacote", obj: p }; abrirModal(V.mPagamento("Receber pacote · " + (nomeDe2("clientes", p.clienteId) || ""), num(p.valor)));
+  },
+  "ret-dias"(el) { S.retDias = +el.dataset.n; render(); },
 
   // comandas
   "cm-nova"() { S.m = { tipo: "cm", itens: [], taxa: true }; abrirModal(V.mComanda({ nome: "", status: "Aberta" })); },
@@ -336,9 +376,14 @@ const ACOES = {
         const venda = await finalizarVenda({ itens: o.itens, desc: 0, pag, clienteId: o.clienteId, origem: "os", origemId: o.id });
         await S.dados.salvar("os", { ...o, status: "Entregue", entregueEm: new Date().toISOString(), vendaId: venda.id }); return venda;
       }
+      if (ctx.tipo === "pacote") {
+        const itens = [{ tipo: "avulso", nome: "Pacote de " + (o.sessoes || 0) + " sessões: " + (nomeDe2("servicos", o.servicoId) || "serviço"), qtd: 1, preco: num(o.valor) }];
+        const venda = await finalizarVenda({ itens, desc: 0, pag, clienteId: o.clienteId, origem: "pacote", origemId: o.id });
+        await S.dados.salvar("pacotes", { ...o, pago: "Sim", vendaId: venda.id }); return venda;
+      }
       if (ctx.tipo === "ag") {
         const itens = [{ tipo: "servico", refId: ctx.sv.id, nome: ctx.sv.nome, qtd: 1, preco: num(ctx.sv.preco) }];
-        const venda = await finalizarVenda({ itens, desc: 0, pag, clienteId: o.clienteId, origem: "agenda", origemId: o.id });
+        const venda = await finalizarVenda({ itens, desc: 0, pag, clienteId: o.clienteId, origem: "agenda", origemId: o.id, profissionalId: o.profissionalId });
         await S.dados.salvar("agenda", { ...o, status: "Concluído", vendaId: venda.id }); return venda;
       }
       const itens = o.itens.map((i) => ({ ...i }));

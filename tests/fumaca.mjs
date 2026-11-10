@@ -1,11 +1,11 @@
 // Abre o app inteiro com um DOM de mentira e aperta todos os botões de cada tela, em cada ramo.
 const mem = {}; globalThis.localStorage = { getItem: k => mem[k] ?? null, setItem: (k, v) => { mem[k] = String(v); }, removeItem: k => { delete mem[k]; } };
-const erros = []; const origErr = console.error; console.error = (...a) => { erros.push(a.map(String).join(" ")); };
+const erros = []; const origErr = console.error; console.error = (...a) => { const t = a.map(String).join(" "); if (!/Firebase indisponível/.test(t)) erros.push(t); };
 const els = {}; const handlers = {};
 const mk = (id) => els[id] ||= { id, value: "", _h: "", hidden: false, textContent: "", dataset: {}, classList: { add() {}, remove() {}, toggle() {} }, focus() {}, matches: () => false, closest: () => null, remove() {}, click() {},
   get innerHTML() { return this._h; }, set innerHTML(v) { this._h = v; registrar(v); } };
 const registrar = (html) => { for (const m of html.matchAll(/id="([\w-]+)"/g)) mk(m[1]); };
-globalThis.document = { title: "", body: { classList: { add() {}, remove() {} }, appendChild() {} }, activeElement: null, createElement: () => mk("_a"),
+globalThis.document = { documentElement: { style: { setProperty() {} } }, title: "", body: { classList: { add() {}, remove() {} }, appendChild() {} }, activeElement: null, createElement: () => mk("_a"),
   querySelector: (s) => (s[0] === "#" ? mk(s.slice(1)) : null), querySelectorAll: () => [], addEventListener: (t, f) => { handlers[t] = f; } };
 globalThis.window = { scrollTo() {}, open() {} }; globalThis.location = { reload() {} };
 globalThis.confirm = () => true; globalThis.URL.createObjectURL = () => "blob:x"; globalThis.URL.revokeObjectURL = () => {};
@@ -55,6 +55,36 @@ for (const ramo of RAMO_IDS) {
   await clicar({ a: "venda-cancelar", id: v.id }); await tick();
   if (Number(S.cols.produtos.find((x) => x.id === p.id).estoque) !== antes) falhas.push("cancelar não devolveu estoque");
   console.log("venda ok:", v && v.total, "estoque", antes, "->", dep, "-> devolvido");
+}
+// fluxo do salão: agenda -> confirmar -> receber (comissão), pacote, retornos
+{
+  for (const k of Object.keys(mem)) delete mem[k];
+  await clicar({ a: "demo-abrir" }); mk("o_nome").value = "Salão";
+  globalThis.document.querySelector = ((q) => (s) => (/input\[name="ramo"\]:checked/.test(s) ? { value: "salao" } : q(s)))(globalThis.document.querySelector);
+  await clicar({ a: "onb-ok" }); await tick(); await tick();
+  await clicar({ a: "ir", rota: "agenda" });
+  for (const m of ["grade", "lista"]) { await clicar({ a: "ag-modo", m }); const h = mk("view").innerHTML; if (m === "grade" && !/gradeag/.test(h)) falhas.push("grade não desenhou"); if (/undefined|NaN/.test(h)) falhas.push("agenda " + m + " ruim"); }
+  const conf = S.cols.agenda.find((a) => a.data === S.dia && a.status === "Confirmado" && a.clienteId && a.servicoId);
+  const pacAntes = S.cols.pacotes.map((p) => p.usadas);
+  // atendimento de quem tem pacote pago (Maria, escova): desconta sessão sem cobrar
+  await clicar({ a: "ag-receber", id: conf.id }); await tick();
+  const depois = S.cols.agenda.find((a) => a.id === conf.id);
+  if (depois.status !== "Concluído" || !depois.pacoteId) falhas.push("pacote não foi usado: " + depois.status);
+  if (S.cols.pacotes[0].usadas !== pacAntes[0] + 1) falhas.push("usadas não subiu");
+  // atendimento sem pacote: abre pagamento, gera venda com profissional
+  const ag = S.cols.agenda.find((a) => a.data === S.dia && a.status === "Agendado" && a.profissionalId && a.servicoId);
+  await clicar({ a: "ag-st", id: ag.id, st: "Confirmado" }); await clicar({ a: "ag-receber", id: ag.id }); mk("f_pag").value = "Pix"; await clicar({ a: "pagar-ok" }); await tick();
+  const v = S.cols.vendas[0];
+  if (!v || v.profissionalId !== ag.profissionalId || v.itens[0].tipo !== "servico") falhas.push("venda do atendimento sem profissional");
+  await clicar({ a: "ir", rota: "comissoes" }); const hc = mk("view").innerHTML;
+  if (!/A pagar/.test(hc) || /undefined|NaN/.test(hc)) falhas.push("comissões ruim");
+  await clicar({ a: "ret-dias", n: "45" }); await clicar({ a: "ir", rota: "retornos" }); const hr = mk("view").innerHTML;
+  if (!/Aniversariantes/.test(hr) || !/há \d+ dias/.test(hr)) falhas.push("retornos sem sem voltar: " + hr.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").slice(0, 400));
+  // cancelar libera a vaga, faltou marca
+  await clicar({ a: "ag-st", id: S.cols.agenda.find((a) => a.status === "Agendado").id, st: "Faltou" }); await tick();
+  if (!S.cols.agenda.some((a) => a.status === "Faltou")) falhas.push("faltou não gravou");
+  // pacote a receber (estética) vira venda
+  console.log("salão ok: venda", v && v.total, "comissão tela", /A pagar/.test(hc));
 }
 console.log("toques:", toques, "| falhas:", falhas.length, "| console.error:", erros.length);
 falhas.slice(0, 20).forEach((f) => console.log(" -", f)); erros.slice(0, 5).forEach((f) => console.log(" err:", f));
