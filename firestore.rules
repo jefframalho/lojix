@@ -1,0 +1,47 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function logado() { return request.auth != null; }
+
+    // Dono do sistema (você): e-mails cadastrados na coleção "admins", documento com o próprio e-mail em minúsculas
+    function admin() {
+      return logado() && exists(/databases/$(database)/documents/admins/$(request.auth.token.email.lower()));
+    }
+
+    // Assinatura em dia: não bloqueada e com vencimento no futuro. Vale para gravar; ler continua liberado
+    // para o lojista ver os próprios dados e conseguir renovar.
+    function ativa(eid) {
+      let a = get(/databases/$(database)/documents/empresas/$(eid)).data.assinatura;
+      return a.status != 'bloqueada' && a.venceEm > request.time;
+    }
+
+    match /admins/{email} {
+      allow get: if logado() && request.auth.token.email.lower() == email;
+    }
+
+    // Uma empresa por lojista; o id do documento é o uid de quem criou a conta
+    match /empresas/{eid} {
+      allow get: if logado() && (request.auth.uid == eid || admin());
+      allow list: if admin();
+
+      // Cadastro novo: só no próprio uid e só com teste grátis de no máximo 8 dias
+      allow create: if logado() && request.auth.uid == eid
+        && request.resource.data.dono == eid
+        && request.resource.data.assinatura.status == 'teste'
+        && request.resource.data.assinatura.venceEm <= request.time + duration.value(8, 'd');
+
+      // O lojista edita nome e ramo, mas nunca a própria assinatura. Você (admin) mexe só na assinatura.
+      allow update: if logado() && (
+        (request.auth.uid == eid && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['assinatura', 'dono']))
+        || (admin() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['assinatura']))
+      );
+
+      // Dados do negócio (clientes, produtos, vendas, etc.)
+      match /{colecao}/{id} {
+        allow read: if logado() && request.auth.uid == eid;
+        allow create, update, delete: if logado() && request.auth.uid == eid && ativa(eid);
+      }
+    }
+  }
+}
